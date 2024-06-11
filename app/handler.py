@@ -1,6 +1,7 @@
 import json, io
+from typing import Optional
 import google.generativeai as genai
-from fastapi import APIRouter, Path
+from fastapi import APIRouter, Path, Query
 from fastapi.exceptions import HTTPException
 from firebase_admin import firestore
 from fastapi import File, UploadFile, Depends
@@ -13,8 +14,16 @@ router = APIRouter(prefix="/api")
 
 
 @router.get("/meals")
-def get_meals(db: firestore.Client = Depends(get_db)):
+def get_meals(db: firestore.Client = Depends(get_db), page: Optional[int] = Query(1), last_visible: Optional[str] = Query(None)):
     meals_ref = db.collection("meals")
+
+    if page and 10:
+        meals_ref = meals_ref.limit(6)
+        if last_visible:
+            last_doc = db.collection("meals").document(last_visible).get()
+            if last_doc.exists:
+                meals_ref = meals_ref.start_after(last_doc)
+
     return [{"id": meal.id, **meal.to_dict()} for meal in meals_ref.stream()]
 
 
@@ -41,15 +50,21 @@ async def add_meal(image: UploadFile = File(...), db: firestore.Client = Depends
             "Try to identify the amount of each food present to improve the estimated total calorie amount.",
             "Capitalize the first letter of the name"
             "If no food is found, it leaves the food list empty and the total calories are zero."
-            "The following json must be returned in the following format: {total_calories: integer, foods: [{name: string, calories: integer, amount: integer, unit: string, total_carbohydrates: string, proteins: string, total_fat: string, saturated_fat: string, sodium: string}]}"
+            "Only process data if there is food in the image.",
+            "When identifying a food, try to identify how many times it is repeated.",
+            "Always try to identify the nutritional information of foods.",
+            "The following json must be returned in the following format: {total_calories: integer, name: string, description: string, foods: [{name: string, calories: integer, amount: integer, unit: string, total_carbohydrates: string, proteins: string, total_fat: string, saturated_fat: string, sodium: string}]}"
             "The raw json must be returned in string format."
             'Use "pt-br" for data.',
         ]
     )
 
-    image_url = upload_image(bucket, image)
+    data = json.loads(response.text)
 
-    data = json.loads(response.candidates[0].content.parts[0].text)
+    if len(data['foods']) == 0:
+        raise HTTPException(status_code=400, detail="No food was found in the image")
+
+    image_url = upload_image(bucket, image)
     data["image_url"] = image_url
 
     doc_ref = db.collection("meals").document()
