@@ -1,6 +1,7 @@
 import json, io
-from typing import Optional
 import google.generativeai as genai
+from datetime import datetime
+from typing import Optional
 from fastapi import APIRouter, Path, Query
 from fastapi.exceptions import HTTPException
 from firebase_admin import firestore
@@ -15,7 +16,7 @@ router = APIRouter(prefix="/api")
 
 @router.get("/meals")
 def get_meals(db: firestore.Client = Depends(get_db), page: Optional[int] = Query(1), last_visible: Optional[str] = Query(None)):
-    meals_ref = db.collection("meals")
+    meals_ref = db.collection("meals").order_by("created_at", direction=firestore.Query.DESCENDING)
 
     if page and 10:
         meals_ref = meals_ref.limit(6)
@@ -66,6 +67,7 @@ async def add_meal(image: UploadFile = File(...), db: firestore.Client = Depends
 
     image_url = upload_image(bucket, image)
     data["image_url"] = image_url
+    data["created_at"] = datetime.now()
 
     doc_ref = db.collection("meals").document()
     doc_ref.set(data)
